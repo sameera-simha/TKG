@@ -15,6 +15,7 @@
 package org.testKitGen;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -88,28 +89,34 @@ public class TestInfoParser {
 		}
 		Set<String> testFlags = new HashSet<>(arg.getTestFlag());
 		for (Map.Entry<String,String> entry : ti.getFeatures().entrySet()) {
-			if (entry.getValue().equalsIgnoreCase("required")) {
-				if (!testFlags.contains(entry.getKey())) {
+			String featureOpt = entry.getValue().toLowerCase();
+			if (featureOpt.equals("required")) {
+				if (!isFeatureInTestFlags(testFlags, entry.getKey())) {
 					return null;
-				} else if (entry.getKey().equalsIgnoreCase("aot")) {
-					ti.setAotOptions("$(AOT_OPTIONS) ");
 				}
-			} else if (entry.getValue().equalsIgnoreCase("applicable")) {
-				if (testFlags.contains("aot") && (entry.getKey().equalsIgnoreCase("aot") || entry.getKey().equalsIgnoreCase("all"))) {
-					ti.setAotOptions("$(AOT_OPTIONS) ");
-				}
-			} else if (entry.getValue().equalsIgnoreCase("nonapplicable")) {
+			} else if (featureOpt.equals("nonapplicable")) {
 				// Do not generate make target if the test is not applicable for one feature defined in TEST_FLAG
-				if (testFlags.contains(entry.getKey())) {
+				if (isFeatureInTestFlags(testFlags, entry.getKey())) {
 					return null;
 				}
-			} else if (entry.getValue().equalsIgnoreCase("explicit")) {
-				if (testFlags.contains("aot") && entry.getKey().equalsIgnoreCase("aot")) {
-					ti.setAotIterations(1);
-				}
+			} else if (featureOpt.equals("applicable") || featureOpt.equals("explicit")) {
+				// Do nothing
 			} else {
 				System.err.println("Error: Please provide a valid feature parameter in test " + ti.getTestCaseName() + ". The valid string is <feature_name>:[required|applicable|nonapplicable|explicit].");
 				System.exit(1);
+			}
+		}
+
+		if (testFlags.contains("aot")) {
+			for (Map.Entry<String,String> entry : ti.getFeatures().entrySet()) {
+				if (doesFeatureMatchTestFlag("aot", entry.getKey())) {
+					String featureOpt = entry.getValue().toLowerCase();
+					if (featureOpt.equals("required") || featureOpt.equals("applicable")) {
+						ti.setAotOptions("$(AOT_OPTIONS) ");
+					} else if (featureOpt.equals("explicit")) {
+						ti.setAotIterations(1);
+					}
+				}
 			}
 		}
 
@@ -205,6 +212,30 @@ public class TestInfoParser {
 			ti = null;
 		}
 		return ti;
+	}
+
+	private boolean isFeatureInTestFlags(Set<String> testFlags, String feature) {
+		for (String testFlag : testFlags) {
+			if (doesFeatureMatchTestFlag(testFlag, feature)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean doesFeatureMatchTestFlag(String testFlag, String feature) {
+		if (feature.equals("all")) {
+			return true;
+		}
+		if (!feature.startsWith("/") || !feature.endsWith("/")) {
+			return testFlag.equalsIgnoreCase(feature);
+		}
+		Pattern pattern = Pattern.compile(feature.substring(1, feature.length() - 1));
+		Matcher matcher = pattern.matcher(testFlag);
+		if (matcher.matches()) {
+			return true;
+		}
+		return false;
 	}
 
 	private boolean checkJavaVersion(String version) {
@@ -382,7 +413,6 @@ public class TestInfoParser {
 				}
 				String spec = arg.getSpec();
 				String fullSpec = spec;
-
 				// Special case 32/31-bit specs which do not have 32 or 31 in the name (i.e.
 				// aix_ppc)
 				if (!spec.contains("-64")) {
@@ -412,14 +442,13 @@ public class TestInfoParser {
 		if (!fullSpec.contains(prSplitOnDot[1])) {
 			return false;
 		}
-
 		if (prSplitOnDot[0].equals("arch") && (prSplitOnDot.length == 3)) {
-			String microArch = prSplitOnDot[2];
-			if (!microArch.equals(arg.getMicroArch())) {
-				return false;
-			}
+			String requiredMicroArch = prSplitOnDot[2];
+			String actualMicroArch = arg.getMicroArch();
+			return compareVersion(requiredMicroArch, actualMicroArch);
 		} else if (prSplitOnDot[0].equals("os") && (prSplitOnDot.length == 4)) {
 			String osName = prSplitOnDot[2];
+			String osVersion = prSplitOnDot[3];
 			if (arg.getOsLabel().isEmpty()) {
 				return false;
 			}
@@ -427,31 +456,42 @@ public class TestInfoParser {
 			if (!osLabelArg[0].equals(osName)) {
 				return false;
 			}
-			String osVersion = prSplitOnDot[3];
-			if (osVersion.endsWith("+")) {
-				int verInt = 0;
-				try {
-					verInt = Integer.parseInt(osVersion.substring(0, osVersion.length() - 1));
-				} catch (NumberFormatException e) {
-					System.out.println("Error: unrecognized platformRequirement: " + prSplitOnDot + ". Only support integer OS version.");
-					System.exit(1);
-				}
-				int argVerInt = 0;
-				try {
-					argVerInt = Integer.parseInt(osLabelArg[1]);
-				} catch (NumberFormatException e) {
-					System.out.println("Error: unrecognized osLabel: " + arg.getOsLabel() + ". Only support integer OS version.");
-					System.exit(1);
-				}
-				if (verInt > argVerInt) {
-					return false;
-				}
-			} else {
-				if (!osLabelArg[1].equals(osVersion)) {
-					return false;
-				}
-			}
+			return compareVersion(osVersion, osLabelArg[1]);
 		}
 		return true;
 	}
+
+	private boolean compareVersion(String requiredLabel, String actualLabel) {
+		if (requiredLabel.isEmpty() || actualLabel.isEmpty()) {
+			return false;
+		} else if (requiredLabel.equals(actualLabel)) {
+			return true;
+		} else if (requiredLabel.endsWith("+")) {
+			Pattern pattern = Pattern.compile("(\\D+)?(\\d+)");
+			Matcher requiredLabelMatcher = pattern.matcher(requiredLabel);
+			Matcher actualLabelMatcher = pattern.matcher(actualLabel);
+
+		  if (requiredLabelMatcher.find() && actualLabelMatcher.find()) {
+			String requiredPrefix = requiredLabelMatcher.group(1) != null ? requiredLabelMatcher.group(1) : "";
+	   		String actualPrefix = actualLabelMatcher.group(1) != null ? actualLabelMatcher.group(1) : "";
+			if (requiredPrefix.equals(actualPrefix)) {
+				int requiredLabelNum = 0;
+				int actualLabelNum = 0;
+				try {
+				requiredLabelNum = Integer.parseInt(requiredLabelMatcher.group(2));
+				actualLabelNum = Integer.parseInt(actualLabelMatcher.group(2));
+				} catch (NumberFormatException e) {
+				System.out.println("Error: unrecognized requiredLabel:" + requiredLabel + " or actualLabel:" + actualLabel);
+				System.err.println(e.getMessage());
+				System.exit(1);
+				}
+				if (actualLabelNum >= requiredLabelNum) {
+					return true;
+				}
+			}
+		  }
+		}
+		return false;
+	  }
+
 }

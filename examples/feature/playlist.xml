@@ -14,23 +14,38 @@
 -->
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../resources/playlist.xsd">
 	<test>
-		<testCaseName>testRerun</testCaseName>
-		<command>echo "test rerun"; \
+		<testCaseName>testFeatureFips</testCaseName>
+		<command>echo "match FIPS140_3_20220501 and everything else by default"; \
 	$(TEST_STATUS)</command>
-		<rerun>true</rerun>
+		<features>
+			<feature>FIPS140_3_20220501:applicable</feature>
+		</features>
 	</test>
 
 	<test>
-		<testCaseName>testDefault</testCaseName>
-		<command>echo "test default rerun"; \
+		<testCaseName>testFeatureFipsNoApplicable</testCaseName>
+		<command>echo "test excluded on FIPS140_2"; \
 	$(TEST_STATUS)</command>
-		<!-- defaults to rerun-->
+		<features>
+			<feature>FIPS140_2:nonapplicable</feature>
+		</features>
 	</test>
 
 	<test>
-		<testCaseName>testIgnoreOnRerun</testCaseName>
-		<command>echo "test ignore on rerun"; \
+		<testCaseName>testFeatureFipsRequired</testCaseName>
+		<command>echo "only run on FIPS140_3_20220101"; \
 	$(TEST_STATUS)</command>
-		<rerun>false</rerun>
+		<features>
+			<feature>FIPS140_3_20220101:required</feature>
+		</features>
+	</test>
+
+	<test>
+		<testCaseName>testFeatureFipsRegexRequired</testCaseName>
+		<command>echo "only run on FIPS140_3 from 2022 Dec 01 to 2029 Dec 31"; \
+	$(TEST_STATUS)</command>
+		<features>
+			<feature>/FIPS140_3_(2022(12\d(2))|202[3-9]\d{4})/:required</feature>
+		</features>
 	</test>
 </playlist>
